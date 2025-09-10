@@ -22,5 +22,5 @@ COPY run.py .
 # Expose port (for Flask/FastAPI server inside container)
 EXPOSE 8080
 
-# Run API server
-CMD ["python", "run.py"]
+# Run FastAPI with uvicorn
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
