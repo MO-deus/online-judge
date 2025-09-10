@@ -1,94 +1,88 @@
-import os
+from fastapi import FastAPI
+from pydantic import BaseModel
 import subprocess
 import tempfile
-from flask import Flask, request, jsonify
+import os
 
-app = Flask(__name__)
+app = FastAPI()
 
-@app.route("/run", methods=["POST"])
-def run_code():
-    data = request.get_json()
-    language = data.get("language")
-    code = data.get("code")
-    test_cases = data.get("testCases", [])
+# Request schema
+class TestCase(BaseModel):
+    input: str
+    expectedOutput: str
 
+class CodeRequest(BaseModel):
+    language: str
+    code: str
+    testCases: list[TestCase]
+
+# Language command mapping
+LANG_COMMANDS = {
+    "python": ["python3", "Main.py"],
+    "javascript": ["node", "main.js"],
+    "java": ["java", "Main"],
+    "cpp": ["./main"]
+}
+
+@app.post("/run")
+def execute_code(req: CodeRequest):
     results = []
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        try:
-            if language == "python":
-                file_path = os.path.join(temp_dir, "solution.py")
-                with open(file_path, "w") as f:
-                    f.write(code)
-                for case in test_cases:
-                    output = subprocess.run(
-                        ["python3", file_path],
-                        input=case.encode(),
-                        capture_output=True,
-                        text=True,
-                        timeout=5
-                    )
-                    results.append({"input": case, "output": output.stdout.strip(), "error": output.stderr.strip()})
+    with tempfile.TemporaryDirectory() as tempdir:
+        filename = None
+        compile_cmd = None
 
-            elif language == "cpp":
-                file_path = os.path.join(temp_dir, "solution.cpp")
-                exe_path = os.path.join(temp_dir, "a.out")
-                with open(file_path, "w") as f:
-                    f.write(code)
-                compile_process = subprocess.run(["g++", file_path, "-o", exe_path], capture_output=True, text=True)
-                if compile_process.returncode != 0:
-                    return jsonify({"error": compile_process.stderr}), 400
-                for case in test_cases:
-                    output = subprocess.run(
-                        [exe_path],
-                        input=case.encode(),
-                        capture_output=True,
-                        text=True,
-                        timeout=5
-                    )
-                    results.append({"input": case, "output": output.stdout.strip(), "error": output.stderr.strip()})
+        # Save code file depending on language
+        if req.language == "python":
+            filename = os.path.join(tempdir, "Main.py")
+        elif req.language == "javascript":
+            filename = os.path.join(tempdir, "main.js")
+        elif req.language == "java":
+            filename = os.path.join(tempdir, "Main.java")
+            compile_cmd = ["javac", filename]
+        elif req.language == "cpp":
+            filename = os.path.join(tempdir, "main.cpp")
+            compile_cmd = ["g++", filename, "-o", os.path.join(tempdir, "main")]
+        else:
+            return {"error": f"Unsupported language {req.language}"}
 
-            elif language == "java":
-                file_path = os.path.join(temp_dir, "Solution.java")
-                with open(file_path, "w") as f:
-                    f.write(code)
-                compile_process = subprocess.run(["javac", file_path], capture_output=True, text=True)
-                if compile_process.returncode != 0:
-                    return jsonify({"error": compile_process.stderr}), 400
-                for case in test_cases:
-                    output = subprocess.run(
-                        ["java", "-cp", temp_dir, "Solution"],
-                        input=case.encode(),
-                        capture_output=True,
-                        text=True,
-                        timeout=5
-                    )
-                    results.append({"input": case, "output": output.stdout.strip(), "error": output.stderr.strip()})
+        # Write code into file
+        with open(filename, "w") as f:
+            f.write(req.code)
 
-            elif language == "javascript":
-                file_path = os.path.join(temp_dir, "solution.js")
-                with open(file_path, "w") as f:
-                    f.write(code)
-                for case in test_cases:
-                    output = subprocess.run(
-                        ["node", file_path],
-                        input=case.encode(),
-                        capture_output=True,
-                        text=True,
-                        timeout=5
-                    )
-                    results.append({"input": case, "output": output.stdout.strip(), "error": output.stderr.strip()})
+        # Compile if needed
+        if compile_cmd:
+            compile_proc = subprocess.run(
+                compile_cmd, cwd=tempdir,
+                capture_output=True, text=True
+            )
+            if compile_proc.returncode != 0:
+                return {"error": compile_proc.stderr}
 
-            else:
-                return jsonify({"error": "Unsupported language"}), 400
+        # Run test cases
+        for tc in req.testCases:
+            try:
+                run_cmd = LANG_COMMANDS[req.language]
+                proc = subprocess.run(
+                    run_cmd,
+                    input=tc.input.encode(),  # ✅ encode input properly
+                    cwd=tempdir,
+                    capture_output=True,
+                    timeout=5
+                )
+                output = proc.stdout.decode().strip()
+                results.append({
+                    "input": tc.input,
+                    "expected": tc.expectedOutput,
+                    "output": output,
+                    "passed": output == tc.expectedOutput
+                })
+            except Exception as e:
+                results.append({
+                    "input": tc.input,
+                    "expected": tc.expectedOutput,
+                    "output": str(e),
+                    "passed": False
+                })
 
-            return jsonify({"results": results})
-
-        except subprocess.TimeoutExpired:
-            return jsonify({"error": "Execution timed out"}), 408
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    return {"results": results}
