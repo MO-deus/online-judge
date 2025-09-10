@@ -17,7 +17,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY run.py .
+COPY . .
 
 # Expose port (for Flask/FastAPI server inside container)
 EXPOSE 8080
