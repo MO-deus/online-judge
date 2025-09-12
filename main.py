@@ -77,7 +77,7 @@ def execute_code(req: CodeRequest):
                     text=True,
                     timeout=5
                 )
-                output = proc.stdout.decode().strip()
+                output = proc.stdout.strip()
                 error = proc.stderr.strip()
                 results.append({
                     "input": tc.input,
