@@ -7,14 +7,18 @@ import os
 app = FastAPI()
 
 # Request schema
+
+
 class TestCase(BaseModel):
     input: str
     expectedOutput: str
+
 
 class CodeRequest(BaseModel):
     language: str
     code: str
     testCases: list[TestCase]
+
 
 # Language command mapping
 LANG_COMMANDS = {
@@ -23,6 +27,7 @@ LANG_COMMANDS = {
     "java": ["java", "Main"],
     "cpp": ["./main"]
 }
+
 
 @app.post("/run")
 def execute_code(req: CodeRequest):
@@ -42,7 +47,8 @@ def execute_code(req: CodeRequest):
             compile_cmd = ["javac", filename]
         elif req.language == "cpp":
             filename = os.path.join(tempdir, "main.cpp")
-            compile_cmd = ["g++", filename, "-o", os.path.join(tempdir, "main")]
+            compile_cmd = ["g++", filename, "-o",
+                           os.path.join(tempdir, "main")]
         else:
             return {"error": f"Unsupported language {req.language}"}
 
@@ -65,16 +71,18 @@ def execute_code(req: CodeRequest):
                 run_cmd = LANG_COMMANDS[req.language]
                 proc = subprocess.run(
                     run_cmd,
-                    input=tc.input.encode(),  # ✅ encode input properly
+                    input=tc.input,  # ✅ encode input properly
                     cwd=tempdir,
                     capture_output=True,
+                    text=True,
                     timeout=5
                 )
                 output = proc.stdout.decode().strip()
+                error = proc.stderr.strip()
                 results.append({
                     "input": tc.input,
                     "expected": tc.expectedOutput,
-                    "output": output,
+                    "output": output if output else error,
                     "passed": output == tc.expectedOutput
                 })
             except Exception as e:
